@@ -1,0 +1,151 @@
+
+version: "3.4"
+
+# Include all required services configuration
+# Ensure a few things are modified:
+# 1. ENV vars
+# 2. Volume mounts (for where you would like volumes mounted on your host)
+# 3. Decide if you would like to mount /config on each service so you can keep a copy on your host of the config and make changes manually if necessary (outside of container)
+services:
+  # Front-end jellyfin (reverse-proxy)
+  webserver:
+    container_name: webserver
+    image: nginx:mainline-alpine
+    volumes:
+      - web-root:/var/www/html # Volume mount for web-root (optional)
+      - ./nginx:/etc/nginx/conf.d # Volume mount for nginx config folder (required)
+    depends_on:
+      - jellyfin
+      - ombi
+    ports:
+      - 80:80
+    restart: unless-stopped
+#     networks:
+#       - media-server-network
+  # NOTE: There are no ports specified for this service since it is accessible using provided nginx configuration
+  ombi:
+    image: lscr.io/linuxserver/ombi
+    container_name: ombi
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    volumes:
+      - /home/scaryninja/Docker/mediaserver/ombi:/config # Change volume mount for config files
+#     networks:
+#       - media-server-network
+    restart: unless-stopped
+  # NOTE: Make sure that libraries are set to /tv and /movies in configuration
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin
+    container_name: jellyfin
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+      - UMASK_SET=<022> #optional
+    volumes:
+      - /home/scaryninja/Docker/mediaserver/jellyfin/library:/config # Jellyfin config / settings
+      - /home/scaryninja/Docker/mediaserver/jellyfin/data/tvshows:/data/tvshows # TV Shows location
+      - /home/scaryninja/Docker/mediaserver/jellyfin/data/movies:/data/movies # Movies location
+      - /home/scaryninja/Docker/mediaserver/jellyfin/data/animes:/data/animes # Movies location
+    ports:
+      - 8096:8096
+      - 8920:8920
+      - 7359:7359/udp # Discovery on network
+      - 1900:1900/udp # Discover on network by DNLA and clients
+    devices:
+      - /dev/dri:/dev/dri # Remove this if you do not want to use INTEL GPU for hardware excellerated transcoding
+#     networks:
+#       - media-server-network
+    restart: unless-stopped
+  # NOTE: Make sure to set download directory to /downloads
+  deluge:
+    image: lscr.io/linuxserver/deluge
+    container_name: deluge
+    ports:
+      - 8112:8112
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+      - UMASK_SET=022 #optional
+      - DELUGE_LOGLEVEL=error #optional
+    volumes:
+      - /home/scaryninja/Docker/mediaserver/deluge:/config # Change path for volume mount
+      - /home/scaryninja/Docker/mediaserver/jellyfin/downloads:/downloads # Change path for volume mount
+#     networks:
+#       - media-server-network
+    restart: unless-stopped
+  # NOTE: With Sonarr, when setting up downloader, make sure ip address is "deluge:8112"
+  sonarr:
+    image: lscr.io/linuxserver/sonarr
+    container_name: sonarr
+    ports:
+      - 8989:8989
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+      - UMASK_SET=022 #optional
+    volumes:
+      - /home/scaryninja/Docker/mediaserver/sonarr:/config # Change path for volume mount
+      - /home/scaryninja/Docker/mediaserver/jellyfin/data/tvshows:/tv # TV Shows location
+      - /home/scaryninja/Docker/mediaserver/jellyfin/downloads:/downloads # Change path for volume mount
+#    networks:
+#      - media-server-network
+    restart: unless-stopped
+  # NOTE: Similar to Sonarr, when setting up downloader make sure to enter "deluge:8112" for the host and port respectively
+  radarr:
+    image: lscr.io/linuxserver/radarr
+    container_name: radarr
+    ports:
+      - 7878:7878
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+      - UMASK_SET=022 #optional
+    volumes:
+      - /home/scaryninja/Docker/mediaserver/radarr:/config # Change path for volume mount
+      - /home/scaryninja/Docker/mediaserver/jellyfin/data/movies:/movies # Movies location
+      - /home/scaryninja/Docker/mediaserver/jellyfin/downloads:/downloads # Change path for volume mount
+#     networks:
+#       - media-server-network
+    restart: unless-stopped
+  # NOTE: With Jackett, ensure blackhole directory is setup at /downloads
+  # Also: Ensure trackers are setup from config
+  jackett:
+    image: lscr.io/linuxserver/jackett
+    container_name: jackett
+    ports:
+      - 9117:9117
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+      - AUTO_UPDATE=true #optional
+    volumes:
+      - /home/scaryninja/Docker/mediaserver/jackett:/config # Change path for volume mount
+      - /home/scaryninja/Docker/mediaserver/jellyfin/downloads:/downloads # Change path for volume mount
+    restart: unless-stopped
+  
+  proton_vpn:
+    container_name: proton_vpn
+    image: qmcgaw/gluetun
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - VPN_SERVICE_PROVIDER=protonvpn
+      - OPENVPN_USER=7azxT8HL18imEQnv
+      - OPENVPN_PASSWORD=2T5K0b3yYi59QaVREJ7OhZuh0svLlxP2
+      - SERVER_COUNTRIES=Japan
+      - FREE_ONLY=on
+    restart: unless-stopped
+
+volumes:
+  web-root:
+    driver: local
+
+# NOTE: It is very important that if you are also running a OpenVPN service on the host, that you include the EXACT subnet address for the network interface to use.
+#       The reason for this is to avoid overlapping of IPv4 addresses. This way as long as your openVPN service is not using the 172.16.57.0/24 subnet, you should not have any overlap.
